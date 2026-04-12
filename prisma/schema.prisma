@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Tenant / embed configuration (§4 multi-tenancy)
+model Site {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Public slug or uuid string used by the widget (`data-site-id`)
+  siteId               String   @unique @map("site_id")
+  /// Store only a hash of the publishable key (never plaintext at rest)
+  publishableKeyHash   String   @map("publishable_key_hash")
+  /// JSON array of allowed Origin values for CORS (e.g. ["https://example.com"])
+  allowedOrigins       Json     @map("allowed_origins")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  ingestJobs IngestJob[]
+  chunks     DocumentChunk[]
+
+  @@map("sites")
+}
+
+enum IngestJobStatus {
+  pending
+  processing
+  done
+  error
+}
+
+/// Chunked ingest worker state (§0.2)
+model IngestJob {
+  id          String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId      String            @map("site_id") @db.Uuid
+  site        Site              @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  status      IngestJobStatus   @default(pending)
+  /// Opaque cursor: page range, chunk offset, etc.
+  cursor      Json?
+  errorMessage String?          @map("error_message")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  @@index([siteId, status])
+  @@map("ingest_jobs")
+}
+
+/// Vector chunks for RAG (§5). Embedding dims must match `text-embedding-3-small` (1536).
+model DocumentChunk {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId       String   @map("site_id") @db.Uuid
+  site         Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  sourceType   String   @map("source_type")
+  sourceUrl    String?  @map("source_url")
+  documentId   String?  @map("document_id")
+  title        String?
+  page         Int?
+  chunkIndex   Int      @map("chunk_index")
+  content      String
+  contentHash  String   @map("content_hash")
+  /// pgvector column — query with raw SQL / `$queryRaw` in Phase B
+  embedding    Unsupported("vector(1536)")?
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([siteId])
+  @@index([siteId, documentId])
+  @@map("document_chunks")
+}

@@ -1,0 +1,23 @@
+{
+  "name": "greenfield-chat-widget",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w web",
+    "build": "npm run build -w @greenfield/widget && npm run build -w web",
+    "lint": "npm run lint --workspaces --if-present",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "prisma": "^6.6.0"
+  }
+}

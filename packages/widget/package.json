@@ -1,0 +1,14 @@
+{
+  "name": "@greenfield/widget",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build && node scripts/copy-to-web.mjs",
+    "lint": "echo \"no lint yet\""
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vite": "^6.2.0"
+  }
+}
