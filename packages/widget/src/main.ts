@@ -1,5 +1,5 @@
 /**
- * Embeddable chat widget (Phase A).
+ * Embeddable chat widget (Phase B: SSE text + citations event).
  *
  * Expected script tag attributes (see docs/PROJECT_BOOTSTRAP_SPEC.md §7):
  * - data-site-id
@@ -27,6 +27,79 @@ function apiBaseFromScript(script: HTMLScriptElement): string {
   }
 }
 
+const MAX_TRANSCRIPT_MESSAGES = 24;
+
+type TranscriptMessage = { role: "user" | "assistant"; content: string };
+
+function transcriptStorageKey(siteId: string): string {
+  return `greenfield-chat-transcript:${siteId}`;
+}
+
+function sessionStorageKey(siteId: string): string {
+  return `greenfield-chat-session:${siteId}`;
+}
+
+function loadTranscript(siteId: string): TranscriptMessage[] {
+  try {
+    const raw = sessionStorage.getItem(transcriptStorageKey(siteId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const out: TranscriptMessage[] = [];
+    for (const m of parsed) {
+      if (
+        m &&
+        typeof m === "object" &&
+        (m as { role?: string }).role === "user" &&
+        typeof (m as { content?: string }).content === "string"
+      ) {
+        out.push({ role: "user", content: (m as { content: string }).content });
+      } else if (
+        m &&
+        typeof m === "object" &&
+        (m as { role?: string }).role === "assistant" &&
+        typeof (m as { content?: string }).content === "string"
+      ) {
+        out.push({
+          role: "assistant",
+          content: (m as { content: string }).content,
+        });
+      }
+    }
+    return out.slice(-MAX_TRANSCRIPT_MESSAGES);
+  } catch {
+    return [];
+  }
+}
+
+function saveTranscript(siteId: string, messages: TranscriptMessage[]): void {
+  try {
+    sessionStorage.setItem(
+      transcriptStorageKey(siteId),
+      JSON.stringify(messages.slice(-MAX_TRANSCRIPT_MESSAGES)),
+    );
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+function getOrCreateSessionId(siteId: string): string {
+  try {
+    const key = sessionStorageKey(siteId);
+    let id = localStorage.getItem(key)?.trim();
+    if (!id) {
+      id =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID()
+          : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      localStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  }
+}
+
 function mount(): void {
   const script = getCurrentScript();
   if (!script) return;
@@ -38,6 +111,9 @@ function mount(): void {
 
   const base = apiBaseFromScript(script);
   if (!base) return;
+
+  const sessionId = getOrCreateSessionId(siteId);
+  let transcript = loadTranscript(siteId);
 
   const root = document.createElement("div");
   root.id = "greenfield-chat-widget-root";
@@ -56,8 +132,8 @@ function mount(): void {
     position: "absolute",
     bottom: "52px",
     right: "0",
-    width: "min(360px, calc(100vw - 32px))",
-    maxHeight: "min(420px, 50vh)",
+    width: "min(460px, calc(100vw - 24px))",
+    maxHeight: "min(620px, 72vh)",
     display: "flex",
     flexDirection: "column",
     borderRadius: "12px",
@@ -66,6 +142,40 @@ function mount(): void {
     border: "1px solid #e5e7eb",
     overflow: "hidden",
   } as CSSStyleDeclaration);
+
+  const panelHeader = document.createElement("div");
+  Object.assign(panelHeader.style, {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "8px 10px",
+    borderBottom: "1px solid #e5e7eb",
+    background: "#f9fafb",
+  } as CSSStyleDeclaration);
+
+  const panelTitle = document.createElement("div");
+  panelTitle.textContent = "Chat";
+  Object.assign(panelTitle.style, {
+    fontSize: "13px",
+    fontWeight: "600",
+    color: "#111827",
+  } as CSSStyleDeclaration);
+
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Minimize chat");
+  closeBtn.textContent = "×";
+  Object.assign(closeBtn.style, {
+    border: "none",
+    background: "transparent",
+    color: "#6b7280",
+    fontSize: "20px",
+    lineHeight: "1",
+    cursor: "pointer",
+    padding: "0 4px",
+  } as CSSStyleDeclaration);
+
+  panelHeader.append(panelTitle, closeBtn);
 
   const log = document.createElement("div");
   Object.assign(log.style, {
@@ -95,6 +205,8 @@ function mount(): void {
     borderRadius: "8px",
     border: "1px solid #d1d5db",
     fontSize: "14px",
+    color: "#111827",
+    background: "#ffffff",
   } as CSSStyleDeclaration);
 
   const send = document.createElement("button");
@@ -141,11 +253,94 @@ function mount(): void {
     log.scrollTop = log.scrollHeight;
   }
 
-  async function streamChat(userText: string): Promise<void> {
+  for (const m of transcript) {
+    if (m.role === "user") {
+      appendBubble(m.content, "user");
+    } else {
+      appendBubble(m.content, "assistant");
+    }
+  }
+
+  function appendInlineFormatted(target: HTMLElement, text: string): void {
+    const re = /\*\*(.+?)\*\*/g;
+    let last = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      if (m.index > last) {
+        target.appendChild(document.createTextNode(text.slice(last, m.index)));
+      }
+      const strong = document.createElement("strong");
+      strong.textContent = m[1] ?? "";
+      target.appendChild(strong);
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) {
+      target.appendChild(document.createTextNode(text.slice(last)));
+    }
+  }
+
+  function renderAssistantFormatted(target: HTMLElement, raw: string): void {
+    target.textContent = "";
+    const lines = raw.split("\n").map((l) => l.trimEnd());
+    const bulletLines = lines.filter((l) => l.trim().startsWith("- "));
+
+    // If there are bullet-style lines, render them as an actual list.
+    if (bulletLines.length > 0) {
+      const firstBulletIdx = lines.findIndex((l) => l.trim().startsWith("- "));
+      let lastBulletIdx = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i]?.trim().startsWith("- ")) {
+          lastBulletIdx = i;
+          break;
+        }
+      }
+
+      const before = lines
+        .slice(0, Math.max(0, firstBulletIdx))
+        .filter((l) => l.trim().length > 0);
+      const after = lines
+        .slice(lastBulletIdx + 1)
+        .filter((l) => l.trim().length > 0);
+
+      if (before.length > 0) {
+        const intro = document.createElement("div");
+        intro.style.marginBottom = "8px";
+        appendInlineFormatted(intro, before.join(" "));
+        target.appendChild(intro);
+      }
+
+      const ul = document.createElement("ul");
+      Object.assign(ul.style, {
+        margin: "0 0 8px",
+        paddingLeft: "20px",
+      } as CSSStyleDeclaration);
+
+      for (const line of bulletLines) {
+        const li = document.createElement("li");
+        li.style.marginBottom = "4px";
+        appendInlineFormatted(li, line.trim().slice(2));
+        ul.appendChild(li);
+      }
+      target.appendChild(ul);
+
+      if (after.length > 0) {
+        const outro = document.createElement("div");
+        appendInlineFormatted(outro, after.join(" "));
+        target.appendChild(outro);
+      }
+      return;
+    }
+
+    appendInlineFormatted(target, raw);
+  }
+
+  async function streamChat(messages: TranscriptMessage[]): Promise<void> {
+    const turn = document.createElement("div");
+    Object.assign(turn.style, { marginBottom: "10px", maxWidth: "100%" });
+
     const assistantEl = document.createElement("div");
     assistantEl.textContent = "";
     Object.assign(assistantEl.style, {
-      marginBottom: "8px",
       padding: "8px 10px",
       borderRadius: "10px",
       maxWidth: "90%",
@@ -153,20 +348,50 @@ function mount(): void {
       color: "#111827",
       whiteSpace: "pre-wrap",
     } as CSSStyleDeclaration);
-    log.appendChild(assistantEl);
+
+    turn.append(assistantEl);
+    log.appendChild(turn);
     log.scrollTop = log.scrollHeight;
 
-    const res = await fetch(`${base}/api/chat`, {
+    const typingEl = document.createElement("div");
+    typingEl.textContent = "Typing";
+    Object.assign(typingEl.style, {
+      marginTop: "6px",
+      marginLeft: "4px",
+      fontSize: "12px",
+      color: "#6b7280",
+    } as CSSStyleDeclaration);
+    turn.appendChild(typingEl);
+
+    let typingTick = 0;
+    const typingTimer = setInterval(() => {
+      typingTick = (typingTick + 1) % 4;
+      typingEl.textContent = `Typing${".".repeat(typingTick)}`;
+    }, 350);
+
+    function stopTypingIndicator(): void {
+      clearInterval(typingTimer);
+      if (typingEl.parentElement) typingEl.remove();
+    }
+
+    const chatUrl = new URL(`${base}/api/chat`);
+    chatUrl.searchParams.set("site_id", siteId);
+    chatUrl.searchParams.set("publishable_key", publishableKey);
+
+    const res = await fetch(chatUrl.toString(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        site_id: siteId,
-        publishable_key: publishableKey,
-        messages: [{ role: "user", content: userText }],
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+        session_id: sessionId,
       }),
     });
 
     if (!res.ok || !res.body) {
+      stopTypingIndicator();
       assistantEl.textContent = "Could not reach assistant.";
       return;
     }
@@ -174,6 +399,9 @@ function mount(): void {
     const reader = res.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
+    let sseEvent = "";
+
+    let assistantRaw = "";
 
     while (true) {
       const { value, done } = await reader.read();
@@ -182,16 +410,38 @@ function mount(): void {
       const lines = buf.split("\n");
       buf = lines.pop() ?? "";
       for (const line of lines) {
+        if (line.startsWith("event:")) {
+          sseEvent = line.slice(6).trim();
+          continue;
+        }
         if (line.startsWith("data: ")) {
           try {
-            const payload = JSON.parse(line.slice(6)) as { text?: string };
-            if (payload.text) assistantEl.textContent += payload.text;
+            const payload = JSON.parse(line.slice(6)) as {
+              text?: string;
+              citations?: unknown;
+            };
+            if (sseEvent === "citations") {
+              // Intentionally hidden from UI for now.
+            } else if (payload.text) {
+              stopTypingIndicator();
+              assistantRaw += payload.text;
+              renderAssistantFormatted(assistantEl, assistantRaw);
+            }
           } catch {
             /* ignore */
           }
+          sseEvent = "";
         }
       }
       log.scrollTop = log.scrollHeight;
+    }
+
+    stopTypingIndicator();
+
+    const trimmed = assistantRaw.trim();
+    if (trimmed.length > 0) {
+      transcript.push({ role: "assistant", content: trimmed });
+      saveTranscript(siteId, transcript);
     }
   }
 
@@ -200,17 +450,24 @@ function mount(): void {
     launcher.setAttribute("aria-expanded", String(!panel.hidden));
   });
 
+  closeBtn.addEventListener("click", () => {
+    panel.hidden = true;
+    launcher.setAttribute("aria-expanded", "false");
+  });
+
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     const text = input.value.trim();
     if (!text) return;
     input.value = "";
+    transcript.push({ role: "user", content: text });
+    saveTranscript(siteId, transcript);
     appendBubble(text, "user");
-    void streamChat(text);
+    void streamChat(transcript);
   });
 
   form.append(input, send);
-  panel.append(log, form);
+  panel.append(panelHeader, log, form);
   root.append(panel, launcher);
   document.body.appendChild(root);
 }

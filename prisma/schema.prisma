@@ -21,8 +21,51 @@ model Site {
 
   ingestJobs IngestJob[]
   chunks     DocumentChunk[]
+  tickets    Ticket[]
 
   @@map("sites")
+}
+
+enum TicketType {
+  support
+  sales_lead
+  general
+}
+
+enum TicketPriority {
+  critical
+  high
+  medium
+  low
+}
+
+enum TicketStatus {
+  open
+  in_progress
+  resolved
+  closed
+}
+
+model Ticket {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  siteId     String         @map("site_id") @db.Uuid
+  site       Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  sessionId  String?        @map("session_id")
+  fullName   String?        @map("full_name")
+  email      String?
+  phone      String?
+  type       TicketType     @default(general)
+  priority   TicketPriority @default(medium)
+  status     TicketStatus   @default(open)
+  summary    String?
+  metadata   Json?
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+
+  @@index([siteId, createdAt])
+  @@index([email])
+  @@index([status, priority])
+  @@map("tickets")
 }
 
 enum IngestJobStatus {
