@@ -1,5 +1,26 @@
-# Optional Python ingest
+# Ingest (optional Python)
 
-Primary ingest for this project is **TypeScript** on Vercel (Route Handlers + Cron + chunked jobs). See `docs/PROJECT_BOOTSTRAP_SPEC.md` §0.2 and §13.
+This directory is a **placeholder** for a future **Python** ingest CLI or worker (for example heavier PDF tooling). It is **not** wired into the app today.
 
-Use this folder only if you add a **Python** CLI or worker (e.g. PyMuPDF) and accept Vercel Python runtime limits for any server routes.
+## Where ingest actually runs
+
+Production ingest is implemented in **TypeScript** inside the Next.js app (`apps/web`):
+
+| Area | Role |
+|------|------|
+| [`apps/web/lib/ingest/fetch-document.ts`](../apps/web/lib/ingest/fetch-document.ts) | Fetch HTTPS documents with SSRF guards and size limits; extract text (HTML / plain text / PDF). |
+| [`apps/web/lib/ingest/queue-ingest.ts`](../apps/web/lib/ingest/queue-ingest.ts) | Chunk text, write `ingest_jobs` + pending work for embeddings. |
+| [`apps/web/lib/ingest/process-ingest-batch.ts`](../apps/web/lib/ingest/process-ingest-batch.ts) | Worker batch: embeddings + `document_chunks` writes. |
+| [`apps/web/app/api/internal/ingest/step/route.ts`](../apps/web/app/api/internal/ingest/step/route.ts) | Secured `GET` step endpoint (Bearer or `?secret=` vs `CRON_SECRET` / `INGEST_CRON_SECRET`). |
+| [`apps/web/app/api/admin/ingest/run-once/route.ts`](../apps/web/app/api/admin/ingest/run-once/route.ts) | Admin-authenticated single step for local dashboards. |
+| [`apps/web/app/api/admin/sites/route.ts`](../apps/web/app/api/admin/sites/route.ts) | Registering a site queues ingest from **document URL** and/or **pasted text**. |
+
+RAG in chat uses embeddings stored per site in Postgres (`document_chunks`). Product background and phased delivery are in [`docs/PROJECT_BOOTSTRAP_SPEC.md`](../docs/PROJECT_BOOTSTRAP_SPEC.md) (see multi-tenancy and ingest sections).
+
+## Python dependencies
+
+[`requirements.txt`](requirements.txt) is intentionally minimal until a Python worker exists. Add libraries here only when you introduce code under this folder.
+
+## Embeddable widget (separate from this folder)
+
+The chat widget and embed script are built from [`packages/widget`](../packages/widget) and served as `widget.js` from the web app. Ingested knowledge is scoped by **`data-site-id`** and authenticated with **`data-publishable-key`** on the script tag; those values come from the admin dashboard after you register a site and complete ingest.
