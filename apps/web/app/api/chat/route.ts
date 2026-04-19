@@ -62,6 +62,33 @@ function buildChatMessages(
   return tail;
 }
 
+/** Snapshot of the client transcript for storage on `Ticket.chatHistory` (user + assistant only). */
+function conversationToChatHistory(
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+): Prisma.InputJsonValue {
+  const rows: Array<{ role: string; content: string }> = [];
+  for (const m of messages) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const content = typeof m.content === "string" ? m.content : "";
+    if (!content.trim()) continue;
+    rows.push({ role: m.role, content });
+  }
+  return rows;
+}
+
+/** Client messages plus this turn’s assistant reply (structured flows are not in the request body yet). */
+function chatSnapshot(
+  messages: OpenAI.Chat.ChatCompletionMessageParam[],
+  assistantReply?: string,
+): Prisma.InputJsonValue {
+  const base = conversationToChatHistory(messages);
+  const tail = assistantReply?.trim();
+  if (!tail) return base;
+  const rows = Array.isArray(base) ? [...base] : [];
+  rows.push({ role: "assistant", content: tail });
+  return rows;
+}
+
 function getLatestUserText(messages: OpenAI.Chat.ChatCompletionMessageParam[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
@@ -307,6 +334,7 @@ async function ensureContactWizardTicket(params: {
   userQuery: string;
   priority: "critical" | "high" | "medium" | "low";
   requestId: string;
+  chatHistory: Prisma.InputJsonValue;
 }) {
   const existing = await findContactWizardTicket(
     params.siteId,
@@ -327,6 +355,7 @@ async function ensureContactWizardTicket(params: {
         fullName: params.fields.fullName ?? existing.fullName,
         email: params.fields.email ?? existing.email,
         phone: params.fields.phone ?? existing.phone,
+        chatHistory: params.chatHistory,
         metadata: {
           ...prev,
           ...metaBase,
@@ -352,6 +381,7 @@ async function ensureContactWizardTicket(params: {
       priority: params.priority,
       status: "in_progress",
       summary: params.userQuery.slice(0, 500),
+      chatHistory: params.chatHistory,
       metadata: metaBase as Prisma.InputJsonValue,
     },
   });
@@ -391,6 +421,8 @@ async function upsertTicket(params: {
   /** When set, written into ticket metadata (e.g. false to exit contact wizard). */
   contactWizard?: boolean;
   metadataExtras?: Record<string, unknown>;
+  /** Full transcript snapshot; replaces prior `chatHistory` when set. */
+  chatHistory?: Prisma.InputJsonValue;
 }) {
   const {
     siteId,
@@ -404,6 +436,7 @@ async function upsertTicket(params: {
     preference,
     contactWizard,
     metadataExtras,
+    chatHistory,
   } = params;
   const fullName = fields.fullName ?? null;
   const email = fields.email ?? null;
@@ -434,6 +467,7 @@ async function upsertTicket(params: {
         priority,
         status,
         summary: latestUserQuery.slice(0, 500),
+        ...(chatHistory === undefined ? {} : { chatHistory }),
         metadata: {
           ...(typeof existing.metadata === "object" && existing.metadata
             ? (existing.metadata as object)
@@ -460,6 +494,7 @@ async function upsertTicket(params: {
       priority,
       status,
       summary: latestUserQuery.slice(0, 500),
+      ...(chatHistory === undefined ? {} : { chatHistory }),
       metadata: {
         requestId,
         latestUserQuery,
@@ -480,8 +515,9 @@ async function respondAfterContactCapture(params: {
   requestId: string;
   priority: "critical" | "high" | "medium" | "low";
   cors: HeadersInit;
+  conversation: OpenAI.Chat.ChatCompletionMessageParam[];
 }): Promise<Response> {
-  const { siteId, sessionId, fields, userQuery, requestId, priority, cors } =
+  const { siteId, sessionId, fields, userQuery, requestId, priority, cors, conversation } =
     params;
 
   const wantsTicket = wantsTicketCreation(userQuery);
@@ -497,6 +533,13 @@ async function respondAfterContactCapture(params: {
     priority,
     status: "open",
     contactWizard: false,
+    chatHistory:
+      wantsTicket || wantsDirect
+        ? conversationToChatHistory(conversation)
+        : chatSnapshot(
+            conversation,
+            "Thanks, I have your details. Would you like to contact the team yourself (I can share email/phone), or should I create a ticket for you?",
+          ),
     metadataExtras: {
       awaitingPreference: !(wantsTicket || wantsDirect),
     },
@@ -514,6 +557,10 @@ async function respondAfterContactCapture(params: {
       status: "open",
       preference: "ticket",
       contactWizard: false,
+      chatHistory: chatSnapshot(
+        conversation,
+        "Perfect, I have created your request ticket and our team will reach out shortly using your contact details. If you want, I can also share direct contact details now.",
+      ),
       metadataExtras: { awaitingPreference: false },
     });
     return sseTextResponse(
@@ -534,6 +581,10 @@ async function respondAfterContactCapture(params: {
       status: "open",
       preference: "direct_contact",
       contactWizard: false,
+      chatHistory: chatSnapshot(
+        conversation,
+        "Great, thanks for sharing your details. You can contact the team at info@informityx.ai or +1 800-88220-333. Would you like me to also create a ticket for you?",
+      ),
       metadataExtras: { awaitingPreference: false },
     });
     return sseTextResponse(
@@ -678,6 +729,10 @@ export async function POST(req: Request) {
             fullName: fields.fullName ?? null,
             email: fields.email ?? null,
             phone: fields.phone ?? null,
+            chatHistory: chatSnapshot(
+              conversation,
+              `Thanks — I still need your ${missing.join(", ")}.`,
+            ),
             metadata: {
               ...meta,
               contactWizard: true,
@@ -709,6 +764,7 @@ export async function POST(req: Request) {
         requestId,
         priority,
         cors,
+        conversation,
       });
     }
   }
@@ -740,6 +796,10 @@ export async function POST(req: Request) {
           status: "open",
           preference: "direct_contact",
           contactWizard: false,
+          chatHistory: chatSnapshot(
+            conversation,
+            "Great — you can contact the team at info@informityx.ai or +1 800-88220-333. If you would like a ticket as well, say “create a ticket”.",
+          ),
           metadataExtras: { awaitingPreference: false },
         });
         return sseTextResponse(
@@ -760,6 +820,10 @@ export async function POST(req: Request) {
           status: "open",
           preference: "ticket",
           contactWizard: false,
+          chatHistory: chatSnapshot(
+            conversation,
+            "Perfect, I have created your request ticket and our team will reach out shortly using your contact details. If you want, I can also share direct contact details now.",
+          ),
           metadataExtras: { awaitingPreference: false },
         });
         return sseTextResponse(
@@ -768,6 +832,15 @@ export async function POST(req: Request) {
         );
       }
 
+      await prisma.ticket.update({
+        where: { id: prefTicket.id },
+        data: {
+          chatHistory: chatSnapshot(
+            conversation,
+            "Just to confirm: should I create a ticket for our team to follow up, or would you prefer our email and phone so you can reach out yourself?",
+          ),
+        },
+      });
       return sseTextResponse(
         "Just to confirm: should I create a ticket for our team to follow up, or would you prefer our email and phone so you can reach out yourself?",
         cors,
@@ -796,6 +869,10 @@ export async function POST(req: Request) {
           userQuery,
           priority,
           requestId,
+          chatHistory: chatSnapshot(
+            conversation,
+            `Happy to help you connect. Before we proceed, please share your ${missing.join(", ")}.`,
+          ),
         });
       }
       return sseTextResponse(
@@ -812,6 +889,7 @@ export async function POST(req: Request) {
       requestId,
       priority,
       cors,
+      conversation,
     });
   }
 

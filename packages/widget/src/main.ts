@@ -100,6 +100,22 @@ function getOrCreateSessionId(siteId: string): string {
   }
 }
 
+/** Clears transcript + server session id for this site in the browser (used on intentional disconnect). */
+function clearStoredChatSession(siteId: string): void {
+  try {
+    sessionStorage.removeItem(transcriptStorageKey(siteId));
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.removeItem(sessionStorageKey(siteId));
+  } catch {
+    /* ignore */
+  }
+}
+
+const LAUNCHER_LABEL = "Talk to us, we are here to help";
+
 function mount(): void {
   const script = getCurrentScript();
   if (!script) return;
@@ -112,7 +128,7 @@ function mount(): void {
   const base = apiBaseFromScript(script);
   if (!base) return;
 
-  const sessionId = getOrCreateSessionId(siteId);
+  let sessionId = getOrCreateSessionId(siteId);
   let transcript = loadTranscript(siteId);
 
   const root = document.createElement("div");
@@ -127,14 +143,14 @@ function mount(): void {
   } as CSSStyleDeclaration);
 
   const panel = document.createElement("div");
-  panel.hidden = true;
+  /** Closed by default. Do not use `[hidden]` alone: inline `display:flex` would override it in the cascade. */
   Object.assign(panel.style, {
     position: "absolute",
     bottom: "52px",
     right: "0",
     width: "min(460px, calc(100vw - 24px))",
     maxHeight: "min(620px, 72vh)",
-    display: "flex",
+    display: "none",
     flexDirection: "column",
     borderRadius: "12px",
     boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
@@ -163,7 +179,7 @@ function mount(): void {
 
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
-  closeBtn.setAttribute("aria-label", "Minimize chat");
+  closeBtn.setAttribute("aria-label", "Close chat");
   closeBtn.textContent = "×";
   Object.assign(closeBtn.style, {
     border: "none",
@@ -224,18 +240,31 @@ function mount(): void {
 
   const launcher = document.createElement("button");
   launcher.type = "button";
-  launcher.setAttribute("aria-label", "Open chat");
-  launcher.textContent = "Chat";
+  launcher.setAttribute("aria-label", LAUNCHER_LABEL);
+  launcher.textContent = LAUNCHER_LABEL;
   Object.assign(launcher.style, {
-    padding: "12px 16px",
+    padding: "10px 14px",
     borderRadius: "999px",
     border: "none",
     background: "#059669",
     color: "#fff",
     fontWeight: "600",
+    fontSize: "12px",
+    lineHeight: "1.25",
+    textAlign: "center",
+    whiteSpace: "normal",
+    maxWidth: "min(280px, calc(100vw - 40px))",
     cursor: "pointer",
     boxShadow: "0 4px 14px rgba(5,150,105,0.35)",
   } as CSSStyleDeclaration);
+
+  function setPanelOpen(open: boolean): void {
+    panel.style.display = open ? "flex" : "none";
+    panel.setAttribute("aria-hidden", open ? "false" : "true");
+    launcher.setAttribute("aria-expanded", String(open));
+  }
+
+  setPanelOpen(false);
 
   function appendBubble(text: string, from: "user" | "assistant"): void {
     const b = document.createElement("div");
@@ -446,13 +475,21 @@ function mount(): void {
   }
 
   launcher.addEventListener("click", () => {
-    panel.hidden = !panel.hidden;
-    launcher.setAttribute("aria-expanded", String(!panel.hidden));
+    setPanelOpen(panel.style.display === "none");
   });
 
-  closeBtn.addEventListener("click", () => {
-    panel.hidden = true;
-    launcher.setAttribute("aria-expanded", "false");
+  closeBtn.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    const ok = window.confirm(
+      "Are you sure you want to disconnect from chat? Your conversation in this browser will be cleared.",
+    );
+    if (!ok) return;
+    clearStoredChatSession(siteId);
+    transcript = [];
+    sessionId = getOrCreateSessionId(siteId);
+    log.replaceChildren();
+    setPanelOpen(false);
   });
 
   form.addEventListener("submit", (e) => {

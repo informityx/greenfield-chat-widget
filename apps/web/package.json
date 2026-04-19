@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "npx prisma generate --schema ../../prisma/schema.prisma",
+    "prebuild": "npx prisma generate --schema ../../prisma/schema.prisma",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

@@ -14,6 +14,8 @@ model Site {
   siteId               String   @unique @map("site_id")
   /// Store only a hash of the publishable key (never plaintext at rest)
   publishableKeyHash   String   @map("publishable_key_hash")
+  /// AES-GCM ciphertext (base64) of publishable key for admin copy-embed; decrypt with ADMIN_SECRET
+  publishableKeyEncrypted String? @map("publishable_key_encrypted")
   /// JSON array of allowed Origin values for CORS (e.g. ["https://example.com"])
   allowedOrigins       Json     @map("allowed_origins")
   createdAt            DateTime @default(now()) @map("created_at")
@@ -58,6 +60,8 @@ model Ticket {
   priority   TicketPriority @default(medium)
   status     TicketStatus   @default(open)
   summary    String?
+  /// Full widget transcript (user + assistant turns) at last ticket touch; JSON array of { role, content }.
+  chatHistory Json?          @map("chat_history")
   metadata   Json?
   createdAt  DateTime       @default(now()) @map("created_at")
   updatedAt  DateTime       @updatedAt @map("updated_at")

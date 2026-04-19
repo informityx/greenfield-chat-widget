@@ -1,26 +1,14 @@
 import { NextResponse } from "next/server";
+import { requireAdminSession } from "@/lib/admin-auth";
 import { prisma } from "@/lib/prisma";
 import { processNextIngestBatch } from "@/lib/ingest/process-ingest-batch";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-export async function GET(req: Request) {
-  const secrets = [
-    process.env.CRON_SECRET,
-    process.env.INGEST_CRON_SECRET,
-  ].filter((s): s is string => Boolean(s));
-  const auth = req.headers.get("authorization");
-  const token = auth?.startsWith("Bearer ") ? auth.slice(7) : null;
-  const q = new URL(req.url).searchParams.get("secret");
-
-  const ok =
-    secrets.length > 0 &&
-    secrets.some((s) => s === token || s === q);
-
-  if (!ok) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+export async function POST(req: Request) {
+  const denied = requireAdminSession(req);
+  if (denied) return denied;
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -42,6 +30,7 @@ export async function GET(req: Request) {
   if ("noJob" in result && result.noJob) {
     return NextResponse.json({
       ok: true,
+      idle: true,
       message: result.message,
       processed: 0,
     });

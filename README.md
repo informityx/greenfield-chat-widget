@@ -39,7 +39,9 @@ Copy [`.env.example`](.env.example) and set values. **Next.js** loads env from *
 | `PUBLISHABLE_KEY_PEPPER` | `/api/chat` tenant auth, `prisma db seed` | Server secret for HMAC of publishable keys |
 | `RAG_TOP_K` | `/api/chat` | Chunks to retrieve (default `8`, max `25`) |
 | `CRON_SECRET` / `INGEST_CRON_SECRET` | `/api/internal/ingest/step` | Protects cron/internal ingest |
-| `ADMIN_SECRET` | Future admin routes | Bootstrap secret |
+| `ADMIN_SECRET` | Admin session + encrypted publishable key storage | Required for `/admin` APIs; also used to **AES-GCM encrypt** publishable keys for one-click **Copy embed** (never plaintext-only in DB) |
+| `ADMIN_DASHBOARD_USER` / `ADMIN_DASHBOARD_PASSWORD` | `POST /api/admin/login` | Dashboard sign-in (set explicitly; for local dev you can use `admin` / `admin`) |
+| `ADMIN_DEMO_PUBLISHABLE_KEY` | Admin “Copy embed” for `demo-site` only | Optional; must match the hashed key in DB (e.g. same as `SEED_DEMO_PUBLISHABLE_KEY` / default `pk_test_demo`) so the script can copy without rotating |
 
 ---
 
@@ -60,6 +62,18 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). The floating **Chat** control uses **`demo-site`** / **`pk_test_demo`** in development after seeding.
+
+### Admin dashboard
+
+With **`ADMIN_SECRET`**, **`ADMIN_DASHBOARD_USER`**, and **`ADMIN_DASHBOARD_PASSWORD`** set in `apps/web/.env.local` (alongside **`PUBLISHABLE_KEY_PEPPER`** and **`OPENAI_API_KEY`**):
+
+1. Open [http://localhost:3000/admin/login](http://localhost:3000/admin/login) and sign in.
+2. Register a **site_id**, **customer site URL** (sets `allowed_origins` / CORS only), and a **knowledge** source: HTTPS **document URL** and/or **pasted text** (URL wins if both are set). The server fetches the document, extracts text, chunks it, and queues an **`IngestJob`**.
+3. Use **Run ingest (batches)** on the success panel (or your existing cron calling **`GET /api/internal/ingest/step`**) until embeddings finish.
+
+The response shows the **publishable key once**—copy it for `data-publishable-key` on the embed script.
+
+On the sites table, **Copy embed** calls **`GET /api/admin/sites/:siteId/embed-snippet`** (with your browser origin) and copies the full `<script …>` tag. Publishable keys are stored **hashed for the widget** and **encrypted for the admin UI** using **`ADMIN_SECRET`** (see migration `publishable_key_encrypted`). Sites created before that column existed, or created without `ADMIN_SECRET`, copy a snippet with **`PASTE_PUBLISHABLE_KEY_HERE`** until you use **Rotate key** once (or re-seed `demo-site`). **Tickets** opens `/admin/sites/<site_id>/tickets`.
 
 ### Ingest sample content (Phase B)
 
@@ -115,6 +129,14 @@ The script resolves the API base URL from its own `src` origin and `POST`s to `/
 | `POST` | `/api/chat` | Loads **`Site`** from DB; verifies **HMAC** publishable key; **CORS** from `allowed_origins`; **RAG** retrieve → stream chat; SSE **`citations`** event |
 | `OPTIONS` | `/api/chat` | CORS preflight; pass **`site_id`** and **`publishable_key`** as **query params** (same as POST URL) |
 | `GET` | `/api/internal/ingest/step` | Processes up to **8** pending **`IngestJob`** chunks (embed + insert); requires cron secret |
+| `POST` | `/api/admin/login` | Sets signed **httpOnly** session cookie (`ADMIN_SECRET` + dashboard user/password) |
+| `POST` | `/api/admin/logout` | Clears admin session |
+| `GET` | `/api/admin/me` | Returns **401** if session invalid |
+| `GET` / `POST` | `/api/admin/sites` | **GET** lists tenants; **POST** creates **`Site`**, optional RAG queue from document URL / paste |
+| `POST` | `/api/admin/sites/:siteId/rotate-publishable-key` | Issues a new **`pk_…`**, updates hash + encrypted copy (when **`ADMIN_SECRET`** is set) |
+| `GET` | `/api/admin/sites/:siteId/embed-snippet` | Returns full embed HTML; header **`x-embed-origin`**: script `src` host; uses vault / demo env / placeholder key |
+| `GET` | `/api/admin/sites/:siteId/tickets` | Lists recent **`Ticket`** rows for that site |
+| `POST` | `/api/admin/ingest/run-once` | Same batch worker as ingest step, gated by admin session (no cron secret in browser) |
 
 Tenant config lives in **`sites`** ([`prisma/schema.prisma`](prisma/schema.prisma)); bootstrap with [`prisma/seed.ts`](prisma/seed.ts).
 
@@ -138,6 +160,10 @@ Models: **`Site`** (tenant + origins + key hash), **`IngestJob`**, **`DocumentCh
 ## Changelog
 
 Add a new **dated** subsection for each meaningful change (features, fixes, infra). Use **ISO date** and a short bullet list.
+
+### 2026-04-19
+
+- **Admin dashboard** at `/admin`: env-based login, register **`Site`** + CORS from customer URL, knowledge from HTTPS **document URL** or **paste**, queued **`IngestJob`**; `POST /api/admin/ingest/run-once` runs one embed batch with session auth; shared ingest processor in `lib/ingest/process-ingest-batch.ts`; document fetch helper with SSRF limits in `lib/ingest/fetch-document.ts`.
 
 ### 2026-04-12
 
