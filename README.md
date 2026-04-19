@@ -18,6 +18,30 @@ Embeddable **chat widget** and **Next.js** backend for a multi-tenant, **RAG-rea
 
 ---
 
+## Product reference (screenshots)
+
+Visual tour of what this repo ships: **admin sign-in** → **widget admin** (sites, register, ingest) → **embeddable chat** on a customer page. Image files live in [`ingest/reference/`](ingest/reference/).
+
+### Admin sign in
+
+Gate for `/admin` using `ADMIN_DASHBOARD_USER` and `ADMIN_DASHBOARD_PASSWORD` from the server environment.
+
+![Admin sign in screen](ingest/reference/admin-sign-in.png)
+
+### Widget admin (sites & ingest)
+
+Register tenants, set CORS from the customer URL, attach an HTTPS document and/or pasted text for RAG, then **Generate script**, **Tickets**, or **Rotate key**. Allowed origins are shown in full, one per line.
+
+![Widget admin — registered sites and register form](ingest/reference/widget-admin-dashboard.png)
+
+### Embeddable chat on a customer page
+
+Launcher and in-page chat after the embed script is installed; answers use ingested content for that `site_id`.
+
+![Embeddable widget — launcher and chat](ingest/reference/embeddable-widget-chat.png)
+
+---
+
 ## Prerequisites
 
 - **Node.js** ≥ 20 (see root [`package.json`](package.json) `engines`)

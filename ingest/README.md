@@ -25,24 +25,4 @@ RAG in chat uses embeddings stored per site in Postgres (`document_chunks`). Pro
 
 The chat widget and embed script are built from [`packages/widget`](../packages/widget) and served as `widget.js` from the web app. Ingested knowledge is scoped by **`data-site-id`** and authenticated with **`data-publishable-key`** on the script tag; those values come from the admin dashboard after you register a site and complete ingest.
 
-## Product reference (screenshots)
-
-End-to-end flow this repo supports: **admin** → **tenant + ingest** → **embeddable assistant** on customer sites. Images live under [`ingest/reference/`](reference/) so they version with the repo.
-
-### Admin sign in
-
-Gate for `/admin`: credentials from `ADMIN_DASHBOARD_USER` and `ADMIN_DASHBOARD_PASSWORD` in the server environment.
-
-![Admin sign in screen](./reference/admin-sign-in.png)
-
-### Widget admin (sites & ingest)
-
-Dashboard to register sites (CORS origins from customer URL), attach an HTTPS document and/or pasted text for RAG, run ingest, **Generate script**, **Tickets**, and **Rotate key**. Allowed origins are listed in full, one per line.
-
-![Widget admin — registered sites and register form](./reference/widget-admin-dashboard.png)
-
-### Embeddable chat on a customer page
-
-Launcher copy and in-page chat after the embed script is installed; conversation is grounded on ingested content for that `site_id`.
-
-![Embeddable widget — launcher and chat](./reference/embeddable-widget-chat.png)
+Screenshots of the admin flow and embeddable widget are in the [root README](../README.md) under **Product reference (screenshots)**; image files live in [`ingest/reference/`](reference/).
