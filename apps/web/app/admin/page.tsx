@@ -411,6 +411,57 @@ export default function AdminDashboardPage() {
         </p>
       ) : null}
 
+      <section className={`${cardClass} p-5 sm:p-6`}>
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-800 text-white dark:bg-slate-700">
+            <IconPlay className="h-5 w-5" aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-white">
+              Background ingest
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-600 dark:text-slate-400">
+              Scheduled ingest calls <code className={mono}>GET /api/internal/ingest/step</code>{" "}
+              (Vercel cron:<span className={mono}> 06:00 UTC daily</span> in{" "}
+              <code className={mono}>vercel.json</code>
+              ). On Hobby that is the automatic run; use the button below anytime to process pending
+              embeddings and <code className={mono}>document_chunks</code> without waiting.
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={ingestRunning}
+                className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-slate-800 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500/40 disabled:pointer-events-none disabled:opacity-50 dark:bg-slate-600 dark:hover:bg-slate-500"
+                onClick={() => void runIngestUntilDone()}
+              >
+                {ingestRunning ? (
+                  <>
+                    <span
+                      className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/50 border-t-transparent motion-reduce:animate-none"
+                      aria-hidden
+                    />
+                    Running batches…
+                  </>
+                ) : (
+                  <>
+                    <IconPlay className="h-5 w-5" aria-hidden />
+                    Run ingest now (batches until idle)
+                  </>
+                )}
+              </button>
+            </div>
+            {ingestLog.length > 0 ? (
+              <pre
+                className={`mt-4 max-h-52 overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs leading-relaxed text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 ${mono}`}
+                tabIndex={0}
+              >
+                {ingestLog.join("\n")}
+              </pre>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
       <section className={`${cardClass} overflow-hidden`}>
         <div className="flex items-center gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800 sm:px-5">
           <IconTable className="h-5 w-5 text-slate-500 dark:text-slate-400" aria-hidden />
@@ -780,15 +831,10 @@ export default function AdminDashboardPage() {
               {ingestRunning ? "Embedding…" : "Run ingest (batches)"}
             </button>
           </div>
-
-          {ingestLog.length > 0 ? (
-            <pre
-              className={`mt-4 max-h-44 overflow-auto rounded-xl border border-slate-200 bg-white/95 p-4 text-xs leading-relaxed text-slate-800 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 ${mono}`}
-              tabIndex={0}
-            >
-              {ingestLog.join("\n")}
-            </pre>
-          ) : null}
+          <p className="mt-3 text-xs leading-relaxed text-slate-600 dark:text-amber-200/70">
+            Progress logs appear in the <strong className="font-medium">Background ingest</strong> section
+            above.
+          </p>
         </section>
       ) : null}
     </div>
