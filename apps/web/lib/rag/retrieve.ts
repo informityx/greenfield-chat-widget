@@ -5,6 +5,8 @@ export type RetrievedChunk = {
   content: string;
   title: string | null;
   sourceUrl: string | null;
+  /** Cosine distance from pgvector (`<=>`); lower is more similar (same ordering as retrieval). */
+  distance: number;
 };
 
 function vectorLiteral(embedding: number[]): string {
@@ -18,21 +20,26 @@ export async function retrieveSimilarChunks(
   topK: number,
 ): Promise<RetrievedChunk[]> {
   const lit = vectorLiteral(embedding);
-  return prisma.$queryRawUnsafe<RetrievedChunk[]>(
+  const rows = await prisma.$queryRawUnsafe<RetrievedChunk[]>(
     `
     SELECT
       id::text AS id,
       content,
       title,
-      source_url AS "sourceUrl"
+      source_url AS "sourceUrl",
+      (embedding <=> $2::vector) AS distance
     FROM document_chunks
     WHERE site_id = $1::uuid
       AND embedding IS NOT NULL
-    ORDER BY embedding <=> $2::vector
+    ORDER BY distance ASC
     LIMIT $3
     `,
     siteUuid,
     lit,
     topK,
   );
+  return rows.map((r) => ({
+    ...r,
+    distance: Number(r.distance),
+  }));
 }

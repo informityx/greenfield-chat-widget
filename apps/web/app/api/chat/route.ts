@@ -3,14 +3,51 @@ import type { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { resolveSiteWithKey } from "@/lib/site";
-import { buildRagSystemMessages } from "@/lib/rag/prompt";
+import {
+  buildRagSystemMessages,
+  type RetrievedForPrompt,
+} from "@/lib/rag/prompt";
 import { embedTexts } from "@/lib/rag/embeddings";
-import { retrieveSimilarChunks } from "@/lib/rag/retrieve";
+import {
+  retrieveSimilarChunks,
+  type RetrievedChunk,
+} from "@/lib/rag/retrieve";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const MAX_MESSAGES = 24;
+
+const SMALL_TALK_REDIRECT =
+  "Hi there! I am here and ready to help. Ask me anything about services, AI capabilities, team extension, or getting in touch.";
+
+const RAG_DISTANCE_GATE_FALLBACK =
+  "I can’t find that in our indexed site content. I can help with our services, how we work, AI capabilities, team extension, or getting you connected with the team—what would you like to know?";
+
+function parseRagMaxCosineDistance(): number | undefined {
+  const raw = process.env.RAG_MAX_COSINE_DISTANCE?.trim();
+  if (!raw) return undefined;
+  const n = Number.parseFloat(raw);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n;
+}
+
+function applyRagDistanceGate(
+  rows: RetrievedChunk[],
+  maxDistance: number | undefined,
+): RetrievedChunk[] {
+  if (maxDistance === undefined) return rows;
+  return rows.filter((r) => Number(r.distance) <= maxDistance);
+}
+
+function chunksForPrompt(rows: RetrievedChunk[]): RetrievedForPrompt[] {
+  return rows.map(({ id, content, title, sourceUrl }) => ({
+    id,
+    content,
+    title,
+    sourceUrl,
+  }));
+}
 
 type ChatMessage = { role: string; content: string };
 
@@ -100,10 +137,38 @@ function getLatestUserText(messages: OpenAI.Chat.ChatCompletionMessageParam[]): 
 }
 
 function isSmallTalk(text: string): boolean {
-  const t = text.trim().toLowerCase();
-  return /^(hi|hello|hey|yo|hola|how are you|good morning|good afternoon|good evening|thanks|thank you)\b/.test(
-    t,
-  );
+  const t = text.trim();
+  if (t.length === 0 || t.length > 48) return false;
+  const lower = t.toLowerCase();
+
+  if (/\?/.test(t) && !/^how are you\??$/i.test(lower)) return false;
+
+  if (
+    /\b(service|services|pricing|price|quote|hire|hiring|ticket|demo|contact|email|phone|project|mvp|contract)\b/i.test(
+      t,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    /^(hi|hello|hey|yo|hola|howdy|sup|'?sup|what'?s up|wassup)\b/.test(lower)
+  ) {
+    return true;
+  }
+  if (/^(thanks|thank you|thx|ty|tysm)\b/.test(lower)) return true;
+  if (/^(good morning|good afternoon|good evening)\b/.test(lower)) return true;
+  if (/^(cool|nice|great|awesome|sweet|lol|lmao|haha|hehe)\b/.test(lower)) {
+    return true;
+  }
+  if (/^(nm|not much|nothing much|same old)\b/.test(lower)) return true;
+  if (/^not much\b/.test(lower)) return true;
+  if (/^(ok|okay|k)\s*[!.]?\s*$/i.test(lower)) return true;
+  if (/^(sure)\s*[!.]?\s*$/i.test(lower)) return true;
+  if (/^(aw+|aww+)\.?(\s+sweet|\s+cute)?\.?\s*$/i.test(lower)) return true;
+  if (/^(love you|luv u|luv you|ily)\s*[!.]?\s*$/i.test(lower)) return true;
+
+  return false;
 }
 
 function isContactOrMeetingIntent(text: string): boolean {
@@ -849,10 +914,7 @@ export async function POST(req: Request) {
   }
 
   if (isSmallTalk(userQuery)) {
-    return sseTextResponse(
-      "Hi there! I am here and ready to help. Ask me anything about services, AI capabilities, team extension, or getting in touch.",
-      cors,
-    );
+    return sseTextResponse(SMALL_TALK_REDIRECT, cors);
   }
 
   if (isContactOrMeetingIntent(userQuery)) {
@@ -893,64 +955,86 @@ export async function POST(req: Request) {
     });
   }
 
-  const encoder = new TextEncoder();
   const openai = new OpenAI({ apiKey });
+  const encoder = new TextEncoder();
+  const ragMaxCosineDistance = parseRagMaxCosineDistance();
+
+  let retrievedRaw: RetrievedChunk[];
+  try {
+    const [queryEmbedding] = await embedTexts(openai, embeddingModel, [
+      userQuery,
+    ]);
+    retrievedRaw = await retrieveSimilarChunks(
+      prisma,
+      site.id,
+      queryEmbedding,
+      topK,
+    );
+  } catch (e) {
+    const msg =
+      e instanceof Error ? e.message : "Embedding or retrieval failed";
+    console.log(JSON.stringify({ level: "error", requestId, msg }));
+    return NextResponse.json({ error: msg }, { status: 502 });
+  }
+
+  const filteredByDistance = applyRagDistanceGate(
+    retrievedRaw,
+    ragMaxCosineDistance,
+  );
+
+  console.log(
+    JSON.stringify({
+      level: "info",
+      requestId,
+      siteId: site.siteId,
+      retrievalCount: retrievedRaw.length,
+      retrievalAfterDistanceFilter: filteredByDistance.length,
+      ragMaxCosineDistance: ragMaxCosineDistance ?? null,
+      bestDistance: retrievedRaw[0]?.distance ?? null,
+      bestDistanceAfterFilter: filteredByDistance[0]?.distance ?? null,
+      chatModel,
+      embeddingModel,
+    }),
+  );
+
+  if (
+    ragMaxCosineDistance !== undefined &&
+    retrievedRaw.length > 0 &&
+    filteredByDistance.length === 0
+  ) {
+    return sseTextResponse(RAG_DISTANCE_GATE_FALLBACK, cors);
+  }
+
+  const retrievedForPrompt = chunksForPrompt(filteredByDistance);
+  const contextLooksWeak = retrievedForPrompt.length === 0;
+
+  const uniqueCitations = new Map<
+    string,
+    { chunkId: string; title: string | null; sourceUrl: string | null }
+  >();
+  for (const r of filteredByDistance) {
+    const key = `${r.sourceUrl ?? ""}|${r.title ?? ""}`;
+    if (!uniqueCitations.has(key)) {
+      uniqueCitations.set(key, {
+        chunkId: r.id,
+        title: r.title,
+        sourceUrl: r.sourceUrl,
+      });
+    }
+  }
+  const citationsPayload = {
+    citations: [...uniqueCitations.values()],
+  };
+
+  const { messages: ragMessages } = buildRagSystemMessages({
+    conversation,
+    retrieved: retrievedForPrompt,
+    contextLooksWeak,
+  });
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        let citationsPayload: {
-          citations: Array<{
-            chunkId: string;
-            title: string | null;
-            sourceUrl: string | null;
-          }>;
-        } = { citations: [] };
-
-        const [queryEmbedding] = await embedTexts(openai, embeddingModel, [
-          userQuery,
-        ]);
-        const retrieved = await retrieveSimilarChunks(
-          prisma,
-          site.id,
-          queryEmbedding,
-          topK,
-        );
-
-        console.log(
-          JSON.stringify({
-            level: "info",
-            requestId,
-            siteId: site.siteId,
-            retrievalCount: retrieved.length,
-            chatModel,
-            embeddingModel,
-          }),
-        );
-
-        const uniqueCitations = new Map<
-          string,
-          { chunkId: string; title: string | null; sourceUrl: string | null }
-        >();
-        for (const r of retrieved) {
-          const key = `${r.sourceUrl ?? ""}|${r.title ?? ""}`;
-          if (!uniqueCitations.has(key)) {
-            uniqueCitations.set(key, {
-              chunkId: r.id,
-              title: r.title,
-              sourceUrl: r.sourceUrl,
-            });
-          }
-        }
-        citationsPayload = {
-          citations: [...uniqueCitations.values()],
-        };
-
-        const { messages: ragMessages } = buildRagSystemMessages({
-          conversation,
-          retrieved,
-        });
-
         const completion = await openai.chat.completions.create({
           model: chatModel,
           messages: ragMessages,

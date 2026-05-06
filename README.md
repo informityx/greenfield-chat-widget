@@ -62,6 +62,7 @@ Copy [`.env.example`](.env.example) and set values. **Next.js** loads env from *
 | `EMBEDDING_MODEL` | `/api/chat`, ingest, step worker | Default `text-embedding-3-small` (must match index / `vector(1536)`) |
 | `PUBLISHABLE_KEY_PEPPER` | `/api/chat` tenant auth, `prisma db seed` | Server secret for HMAC of publishable keys |
 | `RAG_TOP_K` | `/api/chat` | Chunks to retrieve (default `8`, max `25`) |
+| `RAG_MAX_COSINE_DISTANCE` | `/api/chat` | Optional pgvector cosine distance cap; chunks above it are dropped; if every retrieved chunk is dropped, returns a fixed out-of-scope reply (omit to disable) |
 | `CRON_SECRET` / `INGEST_CRON_SECRET` | `/api/internal/ingest/step` | Protects cron/internal ingest |
 | `ADMIN_SECRET` | Admin session + encrypted publishable key storage | Required for `/admin` APIs; also used to **AES-GCM encrypt** publishable keys for one-click **Copy embed** (never plaintext-only in DB) |
 | `ADMIN_DASHBOARD_USER` / `ADMIN_DASHBOARD_PASSWORD` | `POST /api/admin/login` | Dashboard sign-in (set explicitly; for local dev you can use `admin` / `admin`) |
