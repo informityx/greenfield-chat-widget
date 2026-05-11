@@ -114,7 +114,7 @@ function clearStoredChatSession(siteId: string): void {
   }
 }
 
-const LAUNCHER_LABEL = "Talk to us, we are here to help";
+const LAUNCHER_ARIA = "Need help? Chat with our agent now!";
 
 function mount(): void {
   const script = getCurrentScript();
@@ -146,7 +146,7 @@ function mount(): void {
   /** Closed by default. Do not use `[hidden]` alone: inline `display:flex` would override it in the cascade. */
   Object.assign(panel.style, {
     position: "absolute",
-    bottom: "52px",
+    bottom: "76px",
     right: "0",
     width: "min(460px, calc(100vw - 24px))",
     maxHeight: "min(620px, 72vh)",
@@ -159,23 +159,55 @@ function mount(): void {
     overflow: "hidden",
   } as CSSStyleDeclaration);
 
-  const panelHeader = document.createElement("div");
-  Object.assign(panelHeader.style, {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "8px 10px",
-    borderBottom: "1px solid #e5e7eb",
-    background: "#f9fafb",
+  const panelHero = document.createElement("div");
+  Object.assign(panelHero.style, {
+    flexShrink: "0",
+    background: "linear-gradient(180deg, #fb923c 0%, #ea580c 100%)",
+    padding: "14px 12px 16px 16px",
+    borderBottom: "1px solid rgba(255,255,255,0.22)",
   } as CSSStyleDeclaration);
 
-  const panelTitle = document.createElement("div");
-  panelTitle.textContent = "Chat";
-  Object.assign(panelTitle.style, {
-    fontSize: "13px",
-    fontWeight: "600",
-    color: "#111827",
+  const heroTopRow = document.createElement("div");
+  Object.assign(heroTopRow.style, {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
   } as CSSStyleDeclaration);
+
+  const heroLeft = document.createElement("div");
+  Object.assign(heroLeft.style, {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: "12px",
+    minWidth: "0",
+    flex: "1",
+  } as CSSStyleDeclaration);
+
+  const heroIcon = document.createElement("img");
+  heroIcon.src = `${base}/help-operator.svg`;
+  heroIcon.alt = "";
+  heroIcon.setAttribute("aria-hidden", "true");
+  Object.assign(heroIcon.style, {
+    width: "44px",
+    height: "44px",
+    flexShrink: "0",
+    objectFit: "contain",
+    filter: "brightness(0) invert(1)",
+  } as CSSStyleDeclaration);
+
+  const helloEl = document.createElement("div");
+  helloEl.textContent = "Hello,";
+  Object.assign(helloEl.style, {
+    fontSize: "26px",
+    fontWeight: "700",
+    color: "#fff",
+    lineHeight: "1.15",
+  } as CSSStyleDeclaration);
+
+  heroLeft.append(heroIcon, helloEl);
 
   const closeBtn = document.createElement("button");
   closeBtn.type = "button";
@@ -184,14 +216,31 @@ function mount(): void {
   Object.assign(closeBtn.style, {
     border: "none",
     background: "transparent",
-    color: "#6b7280",
-    fontSize: "20px",
+    color: "#fff",
+    fontSize: "24px",
     lineHeight: "1",
     cursor: "pointer",
-    padding: "0 4px",
+    padding: "4px 6px",
+    flexShrink: "0",
+    alignSelf: "flex-start",
+    opacity: "0.95",
   } as CSSStyleDeclaration);
 
-  panelHeader.append(panelTitle, closeBtn);
+  heroTopRow.append(heroLeft, closeBtn);
+
+  const welcomeEl = document.createElement("div");
+  welcomeEl.textContent =
+    "Welcome to our website, book a call, or inquire about our services!";
+  Object.assign(welcomeEl.style, {
+    marginTop: "10px",
+    fontSize: "14px",
+    fontWeight: "500",
+    color: "rgba(255,255,255,0.96)",
+    lineHeight: "1.45",
+    paddingRight: "8px",
+  } as CSSStyleDeclaration);
+
+  panelHero.append(heroTopRow, welcomeEl);
 
   const log = document.createElement("div");
   Object.assign(log.style, {
@@ -240,20 +289,63 @@ function mount(): void {
 
   const launcher = document.createElement("button");
   launcher.type = "button";
-  launcher.setAttribute("aria-label", LAUNCHER_LABEL);
-  launcher.textContent = LAUNCHER_LABEL;
+  launcher.setAttribute("aria-label", LAUNCHER_ARIA);
+
+  const launcherIcon = document.createElement("img");
+  launcherIcon.src = `${base}/help-operator.svg`;
+  launcherIcon.alt = "";
+  launcherIcon.setAttribute("aria-hidden", "true");
+  Object.assign(launcherIcon.style, {
+    width: "38px",
+    height: "38px",
+    flexShrink: "0",
+    objectFit: "contain",
+    filter: "brightness(0) invert(1)",
+  } as CSSStyleDeclaration);
+
+  const launcherTexts = document.createElement("span");
+  Object.assign(launcherTexts.style, {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    textAlign: "left",
+    minWidth: "0",
+  } as CSSStyleDeclaration);
+
+  const launcherLine1 = document.createElement("span");
+  launcherLine1.textContent = "Need help?";
+  Object.assign(launcherLine1.style, {
+    display: "block",
+    fontWeight: "700",
+  } as CSSStyleDeclaration);
+
+  const launcherLine2 = document.createElement("span");
+  launcherLine2.textContent = "Chat with our agent now!";
+  Object.assign(launcherLine2.style, {
+    display: "block",
+    fontWeight: "600",
+    marginTop: "2px",
+  } as CSSStyleDeclaration);
+
+  launcherTexts.append(launcherLine1, launcherLine2);
+  launcher.append(launcherIcon, launcherTexts);
+
   Object.assign(launcher.style, {
-    padding: "10px 14px",
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    gap: "10px",
+    padding: "14px 45px",
     borderRadius: "999px",
     border: "none",
     background: "#059669",
     color: "#fff",
     fontWeight: "600",
-    fontSize: "12px",
-    lineHeight: "1.25",
-    textAlign: "center",
+    fontSize: "16.8px",
+    lineHeight: "1.2",
     whiteSpace: "normal",
-    maxWidth: "min(280px, calc(100vw - 40px))",
+    maxWidth: "min(340px, calc(100vw - 40px))",
     cursor: "pointer",
     boxShadow: "0 4px 14px rgba(5,150,105,0.35)",
   } as CSSStyleDeclaration);
@@ -504,7 +596,7 @@ function mount(): void {
   });
 
   form.append(input, send);
-  panel.append(panelHeader, log, form);
+  panel.append(panelHero, log, form);
   root.append(panel, launcher);
   document.body.appendChild(root);
 }
